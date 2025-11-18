@@ -19,10 +19,10 @@
 
 #include "mbed.h"
 ////////////////////// "#define" values most likely to be changed. //////////////////////
-#define ADC_CHANS  4            // ADC channels.
-#define ADC_CHAN_LEN 5     // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
+#define ADC_CHANS  2            // ADC channels.
+#define ADC_CHAN_LEN 9     // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
 #define ADC_HZ  300     // ADC sampling rate (Hz).                 CI must be >= 7.5 ms.
-#define USBorBLE  0             // Data communication channel: 0 = USB, 1 = BLE.
+#define USBorBLE  1             // Data communication channel: 0 = USB, 1 = BLE.
 
 #define ADC_HBUF_LEN  ADC_CHANS                // ADC hardware samples before interrupt issued.
 #define PKT_DAT_BYT (2*ADC_CHANS*ADC_CHAN_LEN) // Number data bytes in a packet---EXCLUDES header.
@@ -34,13 +34,6 @@
 #define LED_B  10   // second LED
 
 
-#if USBorBLE == 1 // 1 ==> Enable BLE.
-  #include <ArduinoBLE.h>
-  BLEService sensorService("2c56a03e-794e-47f4-a5c8-45f41c238775"); // BLE custom UUID (generate at https://www.uuidgenerator.net).
-  // Bluetooth® Low Energy Characteristic - custom 128-bit UUID, read, notify and write enabled
-  BLECharacteristic sensorCharacteristic("3d0f70f0-3fe0-462a-827f-ce0cce1984da", BLERead | BLEWrite | BLENotify, PKT_BYT); 
-#endif
-
 volatile nrf_saadc_value_t adcBuffer[ADC_HBUF_LEN]; // Hardware ADC samples. Must be 2 bytes/sample.
 static uint16_t adc_buf[2][ADC_CHAN_LEN*ADC_CHANS]; // Software ADC samples before x-mitting. Double-buffered.
 static uint8_t Pkt[PKT_BYT] = {0}; // Full packet (header + data). See spec. Little endian.
@@ -49,6 +42,23 @@ static uint32_t ts_a = 0;          // ADC timestamp. Init. to 0 for debugging.
 static uint32_t ts_p = 1;          // Supposed to be peripheral timestamp. Using now as packet counter.
 volatile bool newScan = false;
 static bool ledToggle = false;
+
+typedef struct __attribute__((packed)) {
+    uint16_t seq;      // 2 bytes
+    int16_t  ac[4];   // 8 bytes
+    int16_t  dc[4];    // 8 bytes
+    uint8_t  reserved[2]; // 2 bytes padding/flags
+} PpgPacket;
+
+PpgPacket ppgPacket;
+
+#if USBorBLE == 1 // 1 ==> Enable BLE.
+  #include <ArduinoBLE.h>
+  BLEService sensorService("2c56a03e-794e-47f4-a5c8-45f41c238775"); // BLE custom UUID (generate at https://www.uuidgenerator.net).
+  // Bluetooth® Low Energy Characteristic - custom 128-bit UUID, read, notify and write enabled
+  // BLECharacteristic sensorCharacteristic("3d0f70f0-3fe0-462a-827f-ce0cce1984da", BLERead | BLEWrite | BLENotify, PKT_BYT); 
+  BLECharacteristic sensorCharacteristic("3d0f70f0-3fe0-462a-827f-ce0cce1984da", BLERead | BLEWrite | BLENotify, sizeof(PpgPacket));
+#endif
 
 void setup() {
   // Initialize non-zero header values. See spec.
@@ -87,13 +97,12 @@ void setup() {
 
 void loop() { // Main (infinite) loop.
   static int16_t IbufLoop = 0; // Next ADC buffer (0 or 1) to transmit.
-
   #if USBorBLE == 1 // 1 ==> BLE.
-    BLEDevice central = BLE.central(); // Listen for BLE peripherals to connect.
-    if (central) { // If a central is connected to peripheral.
-      Serial.print("P: Connected to central: ");
-      Serial.println(central.address()); // Print the central's MAC address.
-      while (central.connected()) { // Send packets while central connected to peripheral.
+        BLEDevice central = BLE.central(); // Listen for BLE peripherals to connect.
+        if (central) { // If a central is connected to peripheral.
+          Serial.print("P: Connected to central: ");
+          Serial.println(central.address()); // Print the central's MAC address.
+          while (central.connected()) { // Send packets while central connected to peripheral.
   #endif
 
         if (IbufISR != IbufLoop) { // Is an ADC buffer ready to transmit?
@@ -104,7 +113,19 @@ void loop() { // Main (infinite) loop.
           memcpy(&Pkt[PKT_HDR_BYT], adc_buf[IbufLoop], PKT_DAT_BYT); // Insert data; packet ready.
           // Transmit packet.
           #if USBorBLE == 1 //1 ==> BLE; else USB. Either method, transmit full packet.
-            sensorCharacteristic.writeValue(Pkt, PKT_BYT);
+            // sensorCharacteristic.writeValue(Pkt, PKT_BYT);
+
+            // assume ADC_CHANS == 2, ADC_CHAN_LEN >= 4
+            int16_t *src = (int16_t*)adc_buf[IbufLoop];  // interleaved [ch0,ch1,ch0,ch1,...]
+            ppgPacket.seq++;
+
+            for (int i = 0; i < 4; i++) {
+                ppgPacket.ac[i] = src[2*i]; //ch1
+                ppgPacket.dc[i]  = src[2*i+1]; //ch2
+            }
+
+            sensorCharacteristic.writeValue((uint8_t*)&ppgPacket, sizeof(PpgPacket));
+          
           #else
             Serial.write((uint8_t *) Pkt, PKT_BYT);
           #endif
@@ -127,7 +148,6 @@ void loop() { // Main (infinite) loop.
 
 
 }
-
 
 extern "C" void SAADC_IRQHandler_v( void ) { // Apparently hardcoded IRQ function name.
   static int m = 0; // Sample index into storage buffer adc_buf[];
