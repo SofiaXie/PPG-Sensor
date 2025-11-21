@@ -19,10 +19,10 @@
 
 #include "mbed.h"
 ////////////////////// "#define" values most likely to be changed. //////////////////////
-#define ADC_CHANS  4            // ADC channels.
-#define ADC_CHAN_LEN  20        // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
-#define ADC_HZ  2000           // ADC sampling rate (Hz).                 CI must be >= 7.5 ms.
-#define USBorBLE  0             // Data communication channel: 0 = USB, 1 = BLE.
+#define ADC_CHANS  2            // ADC channels.
+#define ADC_CHAN_LEN  9        // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
+#define ADC_HZ  300           // ADC sampling rate (Hz).                 CI must be >= 7.5 ms.
+#define USBorBLE  1             // Data communication channel: 0 = USB, 1 = BLE.
 
 #define ADC_HBUF_LEN  ADC_CHANS                // ADC hardware samples before interrupt issued.
 #define PKT_DAT_BYT (2*ADC_CHANS*ADC_CHAN_LEN) // Number data bytes in a packet---EXCLUDES header.
@@ -31,17 +31,10 @@
 
 #define PPI_CHANNEL         (7)
 
-#define RED_LED_CH  9 
-#define IR_LED_CH   10
+#define LED_A  9 
+#define LED_B   10
 
 
-
-#if USBorBLE == 1 // 1 ==> Enable BLE.
-  #include <ArduinoBLE.h>
-  BLEService sensorService("2c56a03e-794e-47f4-a5c8-45f41c238775"); // BLE custom UUID (generate at https://www.uuidgenerator.net).
-  // Bluetooth® Low Energy Characteristic - custom 128-bit UUID, read, notify and write enabled
-  BLECharacteristic sensorCharacteristic("3d0f70f0-3fe0-462a-827f-ce0cce1984da", BLERead | BLEWrite | BLENotify, PKT_BYT); 
-#endif
 
 volatile nrf_saadc_value_t adcBuffer[ADC_HBUF_LEN]; // Hardware ADC samples. Must be 2 bytes/sample.
 static uint16_t adc_buf[2][ADC_CHAN_LEN*ADC_CHANS]; // Software ADC samples before x-mitting. Double-buffered.
@@ -49,6 +42,15 @@ static uint8_t Pkt[PKT_BYT] = {0}; // Full packet (header + data). See spec. Lit
 static uint16_t IbufISR = 0;       // Index to ADC buffer in adc_buf[] currently in use by ISR.
 static uint32_t ts_a = 0;          // ADC timestamp. Init. to 0 for debugging.
 static uint32_t ts_p = 1;          // Supposed to be peripheral timestamp. Using now as packet counter.
+volatile bool newScan = false;
+static bool ledToggle = false;
+
+#if USBorBLE == 1 // 1 ==> Enable BLE.
+  #include <ArduinoBLE.h>
+  BLEService sensorService("2c56a03e-794e-47f4-a5c8-45f41c23567a"); // BLE custom UUID (generate at https://www.uuidgenerator.net).
+  // Bluetooth® Low Energy Characteristic - custom 128-bit UUID, read, notify and write enabled
+  BLECharacteristic sensorCharacteristic("3d0f70f0-3fe0-462a-827f-ce0cce193442", BLERead | BLEWrite | BLENotify, PKT_BYT); 
+#endif
 
 void setup() {
   // Initialize non-zero header values. See spec.
@@ -68,7 +70,7 @@ void setup() {
       BLE.setDeviceName("Arduino Nano 33 BLE Sense"); // Device name seen in BLE scanning software.
       BLE.setLocalName("WPI Sensors");                // Local name seen when scanning for BLE devices.
       BLE.setAdvertisedService(sensorService);
-      BLE.setConnectionInterval(0x0008, 0x0008); // Set CI, increment=1.25 ms. So, min, max CI=8x1.25 ms=10 ms.
+      BLE.setConnectionInterval(0x0018, 0x0018); // Set CI, increment=1.25 ms. So, min, max CI=8x1.25 ms=10 ms.
       sensorService.addCharacteristic(sensorCharacteristic);
       BLE.addService(sensorService);
       sensorCharacteristic.writeValue((byte) 0x00); // Set characteristic initial value.
@@ -80,17 +82,17 @@ void setup() {
   initADC();            // Local function to initialize SAADC.
   initTimer4();         // Local function to setup, start Timer 4.
   
-  // test is adc_hz is being overwrtien
-  Serial.print("Timer4 CC0: ");
-  Serial.println(NRF_TIMER4->CC[0]);
-  Serial.print("Prescaler: ");
-  Serial.println(NRF_TIMER4->PRESCALER);
+  // // test is adc_hz is being overwrtien
+  // Serial.print("Timer4 CC0: ");
+  // Serial.println(NRF_TIMER4->CC[0]);
+  // Serial.print("Prescaler: ");
+  // Serial.println(NRF_TIMER4->PRESCALER);
 
 
   initPPI();            // Local function: assign/connect Timer 4 to SAADC.
 
-  pinMode(RED_LED_CH, OUTPUT);
-  pinMode(IR_LED_CH, OUTPUT);
+  pinMode(LED_A, OUTPUT); //red
+  pinMode(LED_B, OUTPUT); //ir
 
 }
 
@@ -110,10 +112,41 @@ void loop() { // Main (infinite) loop.
           memcpy(&Pkt[10], &ts_a, 4);      // ADC timestamp this packet.
           memcpy(&Pkt[18], &ts_p, 4);      // Packet counter.
           Pkt[25] = (uint8_t) PKT_DAT_BYT; // .Dlen for this packet.
+          
+          ///// DEBUG
+          uint16_t crc = 0;
+          for (int i = 0; i < PKT_DAT_BYT; i++) {
+            crc ^= adc_buf[IbufLoop][i];
+          }
+
+          memcpy(&Pkt[22], &crc, 2);   // Write CRC (little endian)
+          //// DEBUG END        
+          
+          
           memcpy(&Pkt[PKT_HDR_BYT], adc_buf[IbufLoop], PKT_DAT_BYT); // Insert data; packet ready.
+
+          // alernate red and ir led pulses
+          if (newScan) {
+            newScan = false;
+            ledToggle = !ledToggle;
+            digitalWrite(LED_A, ledToggle);
+            digitalWrite(LED_B, !ledToggle);
+          }
+
           // Transmit packet.
           #if USBorBLE == 1 //1 ==> BLE; else USB. Either method, transmit full packet.
             sensorCharacteristic.writeValue(Pkt, PKT_BYT);
+
+            // DEBUG PACKET CHECK
+            // #if 1   
+            // Serial.print("ts_a="); Serial.print(ts_a);
+          
+            // Serial.print(" ts_p="); Serial.print(ts_p);
+            // Serial.print(" Dlen="); Serial.print(PKT_DAT_BYT);
+            // Serial.print(" CRC="); Serial.println(Pkt[22] | (Pkt[23] << 8));
+            // #endif
+            // DEBUG END
+
           #else
             Serial.write((uint8_t *) Pkt, PKT_BYT);
           #endif
@@ -134,6 +167,7 @@ extern "C" void SAADC_IRQHandler_v( void ) { // Apparently hardcoded IRQ functio
 
   if ( NRF_SAADC->EVENTS_END != 0 ) { // Has SAADC filled up the result buffer?
     NRF_SAADC->EVENTS_END = 0;                            // Reset register flag.
+    newScan = true;
     for (int chan = 0; chan < ADC_CHANS; chan++) {        // Store samples from all channels.
       adc_buf[IbufISR][m++] = (uint16_t) adcBuffer[chan]; // Get sample from hardware-directed memory.
     }
@@ -144,15 +178,6 @@ extern "C" void SAADC_IRQHandler_v( void ) { // Apparently hardcoded IRQ functio
       m = 0;                           // Reset buffer sample index to zero.
     }
   }
-
-  if(LEDtoggle){
-    digitalWrite(RED_LED_CH, HIGH);
-    digitalWrite(IR_LED_CH, LOW);
-  }else{
-    digitalWrite(RED_LED_CH, HIGH);
-    digitalWrite(IR_LED_CH, LOW);
-  }
-  LEDtoggle =! LEDtoggle;
 }
 
 void initADC() {

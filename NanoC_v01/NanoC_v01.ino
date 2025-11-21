@@ -5,9 +5,9 @@
 
 #include <ArduinoBLE.h>
 ////////////////////////////////// These first "#define" values must match NanoP.
-#define ADC_CHANS  1            // ADC channels.
-#define ADC_CHAN_LEN  10        // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
-#define ADC_HZ  1000            // ADC sampling rate (Hz).                 CI must be >= 7.5 ms.
+#define ADC_CHANS  2            // ADC channels.
+#define ADC_CHAN_LEN  9        // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
+#define ADC_HZ  300            // ADC sampling rate (Hz).                 CI must be >= 7.5 ms.
 
 #define PKT_DAT_BYT (2*ADC_CHANS*ADC_CHAN_LEN) // Number data bytes in a packet---EXCLUDES header.
 #define PKT_HDR_BYT 26                         // Number header bytes in a packet---EXCLUDES data.
@@ -27,9 +27,9 @@ void setup() {
   Serial.begin(115200);                      // Initialize and set serial port baud rate.
   while (!Serial);                           // Wait for serial port to be ready.
   BLE.begin();                               // Initialize BLE library.
-  BLE.setConnectionInterval(0x0008, 0x0008); // Set CI, increment=1.25 ms. So, min, max CI=8x1.25 ms=10 ms.
+  BLE.setConnectionInterval(0x0018, 0x0018); // Set CI, increment=1.25 ms. So, min, max CI=8x1.25 ms=10 ms.
   TextPkt("C: Bluetooth® Setup");            // Send welcome message.
-  BLE.scanForUuid("2c56a03e-794e-47f4-a5c8-45f41c233442");  // Scan for device with custom-specified UUID.
+  BLE.scanForUuid("2c56a03e-794e-47f4-a5c8-45f41c23567a");  // Scan for device with custom-specified UUID.
 }
 
 void loop() {
@@ -44,6 +44,7 @@ void loop() {
 
     BLE.stopScan();                // Stop scanning for custom-specific peripheral.
     getPeripheralData(peripheral); // While discovered, infinite loop checking for data.
+
   }
 }
 
@@ -60,6 +61,11 @@ void TextPkt(char* Text) { // Transmit text packet.
   //delay(10);                       // Pause 10 ms so do not flood BLE.
   Serial.write((uint8_t *) Pkt, PKT_HDR_BYT+Length); // Write full packet.
   //delay(10);                       // Pause 10 ms so do not flood BLE.
+
+  // // DEBUG CODE
+  // Serial.print("[DEBUG TEXT] ");
+  // Serial.println(Text);
+  
   Pkt[9] = Type;                  // Reset packet data type.
 }
 
@@ -79,14 +85,126 @@ void getPeripheralData(BLEDevice peripheral) {
     peripheral.disconnect();
     return;
   }
+
   // Subscribe to sensor characteristic to wait for updates (i.e., data) from peripheral.
-  BLECharacteristic sensorCharacteristic = peripheral.characteristic("2c56a03e-794e-47f4-a5c8-45f41c233442");
-  sensorCharacteristic.subscribe(); 
+  BLECharacteristic sensorCharacteristic =
+       peripheral.characteristic("3d0f70f0-3fe0-462a-827f-ce0cce193442");
+  
+  if (!sensorCharacteristic) {
+    TextPkt("C: sensorCharacteristic NOT FOUND");
+    peripheral.disconnect();
+    return;
+  }
+  if (!sensorCharacteristic.canSubscribe()) {
+    TextPkt("C: cannot subscribe");
+    peripheral.disconnect();
+    return;
+  }
+
+  sensorCharacteristic.subscribe();
+  TextPkt("C: Streaming");
+
   while (peripheral.connected()) { // While connected to the peripheral.
     if (sensorCharacteristic.valueUpdated()) { // Characteristic/data has been updated.
       int count; // Number of bytes read.
       count = sensorCharacteristic.readValue(Pkt, PKT_BYT);
+
+      // ensure full packets only (62)
+      if (count == PKT_BYT) {
       Serial.write(Pkt, count); // Serial stream to PC.
-    } // if (sensorCharacteristic.valueUpdated())
-  } // while (peripheral.connected())
-} // void getPeripheralData()
+      }
+      // NO Serial.print, NO debug text here
+    }
+  }
+  TextPkt("C: Disconnected");
+}
+
+
+// void getPeripheralData(BLEDevice peripheral) {
+
+//   TextPkt("C: Connecting?");
+
+//   if (peripheral.connect()) TextPkt("C: Connected");
+//   else { TextPkt("C: Connect failed!"); return; }
+
+//   TextPkt("C: Attributes?");
+//   if (peripheral.discoverAttributes()) TextPkt("C: Attributes OK");
+//   else {
+//     TextPkt("C: Attributes failed");
+//     peripheral.disconnect();
+//     return;
+//   }
+
+//   BLECharacteristic sensorCharacteristic =
+//        peripheral.characteristic("3d0f70f0-3fe0-462a-827f-ce0cce193442");
+
+//   sensorCharacteristic.subscribe(); 
+
+//   // >>> DEBUG MODE: show what the central is receiving <<<
+//   TextPkt("C: Entering data loop (DEBUG)");
+
+//   while (peripheral.connected()) {
+
+//     if (sensorCharacteristic.valueUpdated()) {
+//       int count = sensorCharacteristic.readValue(Pkt, PKT_BYT);
+
+//       // 1) Show how many bytes we actually got
+//       Serial.print("[DATA] count = ");
+//       Serial.println(count);
+
+//       if (count == PKT_BYT) {
+//         // 2) Print header bytes in hex
+//         Serial.print("C_HDR: ");
+//         for (int i = 0; i < PKT_HDR_BYT; i++) {
+//           if (Pkt[i] < 16) Serial.print("0");
+//           Serial.print(Pkt[i], HEX);
+//           Serial.print(" ");
+//         }
+//         Serial.println();
+
+//         // 3) Decode some header fields numerically
+//         uint16_t Fsamp = *(uint16_t*)&Pkt[6];
+//         uint8_t chans_m1 = Pkt[8];
+//         uint8_t type = Pkt[9];
+//         uint32_t ts_a = *(uint32_t*)&Pkt[10];
+//         uint32_t ts_p = *(uint32_t*)&Pkt[18];
+//         uint16_t crc  = *(uint16_t*)&Pkt[22];
+//         uint8_t Dlen  = Pkt[25];
+
+//         Serial.print("Fsamp="); Serial.print(Fsamp);
+//         Serial.print(" chans="); Serial.print(chans_m1 + 1);
+//         Serial.print(" type=");  Serial.print(type);
+//         Serial.print(" ts_a=");  Serial.print(ts_a);
+//         Serial.print(" ts_p=");  Serial.print(ts_p);
+//         Serial.print(" Dlen=");  Serial.print(Dlen);
+//         Serial.print(" CRC=");   Serial.println(crc);
+
+//         // 4) Print first few samples of channel 1
+//         uint16_t* pSamp = (uint16_t*)&Pkt[PKT_HDR_BYT];
+//         Serial.print("Ch1 samples: ");
+//         for (int i = 0; i < ADC_CHAN_LEN; i++) { // 9 samples for channel 1
+//           Serial.print(pSamp[i]);
+//           Serial.print(" ");
+//         }
+//         Serial.println();
+
+//         // 5) Print first few samples of channel 2
+//         Serial.print("Ch2 samples: ");
+//         for (int i = 0; i < ADC_CHAN_LEN; i++) {
+//           Serial.print(pSamp[ADC_CHAN_LEN + i]);
+//           Serial.print(" ");
+//         }
+//         Serial.println();
+//         Serial.println("----");
+//       } else {
+//         // Short packet – useful to see if BLE is truncating
+//         Serial.println("[WARN] Short packet received!");
+//       }
+
+//       // IMPORTANT: while debugging, DO NOT forward to WDscope
+//       // Serial.write(Pkt, PKT_BYT);  // <-- keep this commented out in debug mode
+//     }
+//   }
+// }
+
+

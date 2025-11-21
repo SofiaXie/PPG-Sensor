@@ -54,10 +54,10 @@ PpgPacket ppgPacket;
 
 #if USBorBLE == 1 // 1 ==> Enable BLE.
   #include <ArduinoBLE.h>
-  BLEService sensorService("2c56a03e-794e-47f4-a5c8-45f41c238775"); // BLE custom UUID (generate at https://www.uuidgenerator.net).
+  BLEService sensorService("2c56a03e-794e-47f4-a5c8-45f41c233442"); // BLE custom UUID (generate at https://www.uuidgenerator.net).
   // Bluetooth® Low Energy Characteristic - custom 128-bit UUID, read, notify and write enabled
   // BLECharacteristic sensorCharacteristic("3d0f70f0-3fe0-462a-827f-ce0cce1984da", BLERead | BLEWrite | BLENotify, PKT_BYT); 
-  BLECharacteristic sensorCharacteristic("3d0f70f0-3fe0-462a-827f-ce0cce1984da", BLERead | BLEWrite | BLENotify, sizeof(PpgPacket));
+  BLECharacteristic sensorCharacteristic("3d0f70f0-3fe0-462a-827f-ce0cce193442", BLERead | BLEWrite | BLENotify, sizeof(PpgPacket));
 #endif
 
 void setup() {
@@ -111,6 +111,14 @@ void loop() { // Main (infinite) loop.
           memcpy(&Pkt[18], &ts_p, 4);      // Packet counter.
           Pkt[25] = (uint8_t) PKT_DAT_BYT; // .Dlen for this packet.
           memcpy(&Pkt[PKT_HDR_BYT], adc_buf[IbufLoop], PKT_DAT_BYT); // Insert data; packet ready.
+          
+          if (newScan) {
+            newScan = false;
+            ledToggle = !ledToggle;
+            digitalWrite(LED_A, ledToggle);
+            digitalWrite(LED_B, !ledToggle);
+          }
+          
           // Transmit packet.
           #if USBorBLE == 1 //1 ==> BLE; else USB. Either method, transmit full packet.
             // sensorCharacteristic.writeValue(Pkt, PKT_BYT);
@@ -138,13 +146,6 @@ void loop() { // Main (infinite) loop.
       Serial.println(central.address());
     } // if (central)....
   #endif
-
- if (newScan) {
-    newScan = false;
-    ledToggle = !ledToggle;
-    digitalWrite(LED_A, ledToggle);
-    digitalWrite(LED_B, !ledToggle);
-  }
 
 
 }
