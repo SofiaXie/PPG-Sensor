@@ -125,13 +125,13 @@ void loop() { // Main (infinite) loop.
           
           memcpy(&Pkt[PKT_HDR_BYT], adc_buf[IbufLoop], PKT_DAT_BYT); // Insert data; packet ready.
 
-          // alernate red and ir led pulses
-          if (newScan) {
-            newScan = false;
-            ledToggle = !ledToggle;
-            digitalWrite(LED_A, ledToggle);
-            digitalWrite(LED_B, !ledToggle);
-          }
+          // // alernate red and ir led pulses
+          // if (newScan) {
+          //   newScan = false;
+          //   ledToggle = !ledToggle;
+          //   digitalWrite(LED_A, ledToggle);
+          //   digitalWrite(LED_B, !ledToggle);
+          // }
 
           // Transmit packet.
           #if USBorBLE == 1 //1 ==> BLE; else USB. Either method, transmit full packet.
@@ -168,6 +168,15 @@ extern "C" void SAADC_IRQHandler_v( void ) { // Apparently hardcoded IRQ functio
   if ( NRF_SAADC->EVENTS_END != 0 ) { // Has SAADC filled up the result buffer?
     NRF_SAADC->EVENTS_END = 0;                            // Reset register flag.
     newScan = true;
+
+        // alernate red and ir led pulses
+    if (newScan) {
+      newScan = false;
+      ledToggle = !ledToggle;
+      digitalWrite(LED_A, ledToggle);
+      digitalWrite(LED_B, !ledToggle);
+    }
+    
     for (int chan = 0; chan < ADC_CHANS; chan++) {        // Store samples from all channels.
       adc_buf[IbufISR][m++] = (uint16_t) adcBuffer[chan]; // Get sample from hardware-directed memory.
     }
