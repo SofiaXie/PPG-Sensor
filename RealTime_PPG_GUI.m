@@ -1,7 +1,7 @@
 function RealTime_PPG_GUI(ComPort)
 
 if nargin==0
-    ComPort = "COM5";
+    ComPort = "COM7";
 end
 BaudRate = 115200;
 
@@ -14,15 +14,16 @@ disp("Connected. Reading interleaved IR/RED (IR=odd, RED=even)...");
 fs = 300;       % Arduino sample rate
 winSec = 5;      % seconds of data for display
 N = fs*winSec;   % number of samples in buffer
-HRbufLen = 100;    % moving average length for HR
+HRbufLen = 300;    % moving average length for HR
 IRbuf  = zeros(1,N);
 REDbuf = zeros(1,N);
 idx = 1;
+persistent lastHR
 
 % Filters
-[b,a] = butter(4, 40/(fs/2), 'low');
-[bHP,aHP] = butter(4, 0.8/(fs/2), 'high');
-[bLP,aLP] = butter(4, 3/(fs/2), 'low');
+[b,a] = butter(3, 40/(fs/2), 'low');
+[bHP,aHP] = butter(3, 1/(fs/2), 'high');
+[bLP,aLP] = butter(3, 20/(fs/2), 'low');
 
 
 HRbuf = zeros(1, HRbufLen);
@@ -35,6 +36,7 @@ f = figure('Name','Real-Time PPG','NumberTitle','off',...
 ax = subplot(2,1,1);
 hIR  = plot(ax, zeros(1,N), 'b'); hold on;
 hRED = plot(ax, zeros(1,N), 'r');
+hPeaks = plot(ax, NaN, NaN, 'wx', 'MarkerFaceColor','w'); 
 xlabel('Samples'); ylabel('ADC'); title('RAW ADC DATA');
 ylim([0 4095]);
 legend('IR LED','RED LED');
@@ -99,8 +101,8 @@ while ishandle(f)
     if isempty(raw), continue; end
 
     % Split interleaved IR/RED
-    IR  = raw(1:2:end);
-    RED = raw(2:2:end);
+    RED  = raw(1:2:end);
+    IR = raw(2:2:end);
     ns  = length(IR);
 
     % Circular buffer
@@ -125,20 +127,37 @@ while ishandle(f)
     IRf = filtfilt(bHP,aHP,IRbuf);
     IRf = filtfilt(bLP,aLP,IRf);
 
-    % Heart rate
-    minDist = round(0.35*fs);
-    [pks, locs] = findpeaks(IRf,'MinPeakDistance',minDist,'MinPeakProminence',25);
-    if numel(locs)>=2
-        ibi = diff(locs)/fs;
-        HR = 60/ibi(end);
-    else
-        HR = NaN;
+if isempty(lastHR)
+    lastHR = NaN;
+end
+
+% Peak detection
+minDist = round(0.20*fs); % minimum distance between peaks
+[pks, locs] = findpeaks(IRf, 'MinPeakDistance', minDist, 'MinPeakProminence', 25);
+
+if numel(locs) >= 2
+    ibi = diff(locs)/fs;
+    HR = 30/ibi(end);  % half due to halving sampling rate
+    
+    % Hysteresis: only update HR if difference is < threshold
+    if ~isnan(lastHR)
+        deltaHR = HR - lastHR;
+        maxChange = 10; % max bpm change per update
+        if abs(deltaHR) > maxChange
+            HR = lastHR + sign(deltaHR)*maxChange;
+        end
     end
+    
+    lastHR = HR; % store for next iteration
+else
+    HR = lastHR; % keep previous HR if no peak detected
+end
+
 
     % Moving average HR
     HRbuf(HRidx) = HR;
     HRidx = mod(HRidx, HRbufLen) + 1;
-    HRavg = mean2(HRbuf);
+    HRavg = mean(HRbuf, 'omitnan');
 
     % SpO2
     AC_IR  = max(IRclean)-min(IRclean);
@@ -146,11 +165,24 @@ while ishandle(f)
     AC_RED = max(REDclean)-min(REDclean);
     DC_RED = mean(REDclean);
     R = (AC_RED/DC_RED)/(AC_IR/DC_IR);
-    SpO2 = min((130 - 22*R),100);
+    SpO2 = min((120 - 20*R),100);
+ 
+    
+    % Update plots
+    padding = 50; % small margin
+ymin = min(min(IRclean), min(REDclean)) - padding;
+ymax = max(max(IRclean), max(REDclean)) + padding;
+ylim(ax, [ymin ymax]);
 
-    % Update plots (always)
-    set(hIR,'YData',IRbuf);
-    set(hRED,'YData',REDbuf);
+    set(hIR,'YData',IRclean);
+    set(hRED,'YData',REDclean);
+
+    % Update beat markers
+    if ~isempty(locs)
+        set(hPeaks,'XData',locs,'YData',IRbuf(locs));
+    else
+        set(hPeaks,'XData',NaN,'YData',NaN);
+    end
 
     % Update text at most once per second
     if toc(lastUpdateTime) >= 1
