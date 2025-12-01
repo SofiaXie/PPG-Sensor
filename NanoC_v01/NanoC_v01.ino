@@ -113,13 +113,12 @@ void getPeripheralData(BLEDevice peripheral) {
       if (count == PKT_BYT) {
       Serial.write(Pkt, count); // Serial stream to PC.
       }
-      // NO Serial.print, NO debug text here
     }
   }
   TextPkt("C: Disconnected");
 }
 
-
+// TEST CODE
 // void getPeripheralData(BLEDevice peripheral) {
 
 //   TextPkt("C: Connecting?");

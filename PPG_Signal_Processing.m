@@ -3,10 +3,14 @@ clear; close all;
 %% Load raw PPG data
 load('test13.mat');
 WDcatWLpktData(WLpkt);
+A = WDcatWLpktData(WLpkt);
 raw = ans;
 ir_data  = raw(1, 1:2:end);   % IR
 red_data = raw(1, 2:2:end);   % Red
 fs = 150;
+
+figure;
+plot(A(1, :));
 
 % Process PPG offline
 processPPGOffline(red_data, ir_data, fs);
