@@ -26,7 +26,7 @@ RED_raw = raw(1, 2:2:end);
 
 fs = 300;                    % sampling rate
 N  = length(IR_raw);
-t  = (0:N-1)/fs;             % time vector
+t  = ((0:N-1)/fs)*2;             % time vector
 
 %% ====================== Filters ================================
 
