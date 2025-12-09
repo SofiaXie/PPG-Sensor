@@ -1,3 +1,5 @@
+// NEW FILE 
+
 //    Central BLE software added originally (2025) by KJR, using open-source
 //  software from: https://docs.arduino.cc/tutorials/nano-33-ble-sense/ble-device-to-device/.
 //  Arduino tutorials referring to this software can be found at:
@@ -5,8 +7,8 @@
 
 #include <ArduinoBLE.h>
 ////////////////////////////////// These first "#define" values must match NanoP.
-#define ADC_CHANS  2            // ADC channels.
-#define ADC_CHAN_LEN  9        // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
+#define ADC_CHANS  1            // ADC channels.
+#define ADC_CHAN_LEN  18        // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
 #define ADC_HZ  300            // ADC sampling rate (Hz).                 CI must be >= 7.5 ms.
 
 #define PKT_DAT_BYT (2*ADC_CHANS*ADC_CHAN_LEN) // Number data bytes in a packet---EXCLUDES header.
