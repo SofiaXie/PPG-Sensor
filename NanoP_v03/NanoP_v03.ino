@@ -20,7 +20,7 @@
 #include "mbed.h"
 ////////////////////// "#define" values most likely to be changed. //////////////////////
 #define ADC_CHANS  1            // ADC channels.
-#define ADC_CHAN_LEN  10        // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
+#define ADC_CHAN_LEN  18        // ADC samples/channel before xmit packet. CI = ADC_CHAN_LEN/ADC_Hz.
 #define ADC_HZ  300           // ADC sampling rate (Hz).                 CI must be >= 7.5 ms.
 #define USBorBLE  1             // Data communication channel: 0 = USB, 1 = BLE.
 
